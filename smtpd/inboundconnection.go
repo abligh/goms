@@ -1,4 +1,4 @@
-package goms
+package smtpd
 
 import (
 	"bufio"

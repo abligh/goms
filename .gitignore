@@ -3,5 +3,8 @@
 *~
 \#*\#
 certs
-goms/goms
-goms/goms.test
+goms
+smtpd/goms
+smtpd/goms.test
+smtpd/smtpd
+smtpd/smtpd.test

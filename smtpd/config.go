@@ -1,4 +1,4 @@
-package goms
+package smtpd
 
 import (
 	"context"
@@ -351,7 +351,7 @@ func RunConfig(control *Control) {
 	defer close(term)
 	defer close(hup)
 	defer close(usr1)
-	if control == nil {
+	if !*foreground {
 		signal.Notify(intr, os.Interrupt)
 		signal.Notify(term, syscall.SIGTERM)
 		signal.Notify(hup, syscall.SIGHUP)
@@ -461,7 +461,6 @@ func Run(control *Control) {
 	// destination is supplied) and the config file cannot be read
 	if _, err := ParseConfig(); err != nil {
 		logger.Fatalf("[CRIT] Cannot parse configuration file: %v", err)
-		return
 	}
 
 	if *foreground {
@@ -519,4 +518,5 @@ func Run(control *Control) {
 	}()
 
 	RunConfig(control)
+	return
 }
