@@ -3,9 +3,11 @@ package goms
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net"
 	"net/smtp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,6 +40,60 @@ func newTestLogger(t *testing.T) *log.Logger {
 
 func newTestLoggerWithPrefix(t *testing.T, prefix string) *log.Logger {
 	return log.New(&testLoggerAdapter{t: t, prefix: prefix}, "", log.Lmicroseconds)
+}
+
+type SMTPClient struct {
+	*smtp.Client
+}
+
+// Cmd is a convenience function that sends a command and returns the response
+// incorporated from go sources
+func (c *SMTPClient) Cmd(expectCode int, format string, args ...interface{}) (int, string, error) {
+	id, err := c.Text.Cmd(format, args...)
+	if err != nil {
+		return 0, "", err
+	}
+	c.Text.StartResponse(id)
+	defer c.Text.EndResponse(id)
+	code, msg, err := c.Text.ReadResponse(expectCode)
+	return code, msg, err
+}
+
+// Expand checks the validity of an email address on the server.
+// If Expand returns nil, the address expands.
+func (c *SMTPClient) Expand(addr string) error {
+	_, _, err := c.Cmd(250, "EXPN %s", addr)
+	return err
+}
+
+// Help
+func (c *SMTPClient) Help() error {
+	_, _, err := c.Cmd(250, "HELP")
+	return err
+}
+
+// Noop
+func (c *SMTPClient) Noop() error {
+	_, _, err := c.Cmd(250, "NOOP")
+	return err
+}
+
+// Long line
+func (c *SMTPClient) NoopLong() error {
+	_, _, err := c.Cmd(250, "NOOP", strings.Repeat("x", 4096))
+	return err
+}
+
+// Send a bad 'MAIL FROM' command
+func (c *SMTPClient) BadMail(addr string) error {
+	_, _, err := c.Cmd(250, "MAIL FROM", addr) // note missing colon
+	return err
+}
+
+// Send a bad 'RCPT TO' command
+func (c *SMTPClient) BadRcpt(addr string) error {
+	_, _, err := c.Cmd(250, "RCPT TO", addr) // note missing colon
+	return err
 }
 
 // TestITP is an InboundTransactionProcessor which accepts all mail and dumps it
@@ -78,7 +134,7 @@ type TestConnection struct {
 	ic      *InboundConnection
 	ctx     context.Context
 	cancel  context.CancelFunc
-	client  *smtp.Client
+	client  *SMTPClient
 	timeout *time.Timer
 	itp     *TestITP
 }
@@ -111,7 +167,7 @@ func (tc *TestConnection) Connect() error {
 	if client, err := smtp.NewClient(tc.cc, "localhost"); err != nil {
 		return err
 	} else {
-		tc.client = client
+		tc.client = &SMTPClient{client}
 		return nil
 	}
 }
@@ -155,6 +211,24 @@ func TestConnectForbidden(t *testing.T) {
 	}
 }
 
+func TestAbort(t *testing.T) {
+	tc := NewTestConnection(t)
+	defer tc.Close()
+
+	if err := tc.Connect(); err != nil {
+		t.Fatalf("Cannot connect to server: %v", err)
+	}
+
+	if err := tc.client.Hello("localhost"); err != nil {
+		t.Fatalf("Cannot say hello to server: %v", err)
+	}
+
+	tc.itp.err = errors.New("Abort")
+	if err := tc.client.Mail("a@a"); err == nil {
+		t.Fatalf("Unexpected success when abort requested")
+	}
+}
+
 func TestHello(t *testing.T) {
 	tc := NewTestConnection(t)
 	defer tc.Close()
@@ -165,6 +239,65 @@ func TestHello(t *testing.T) {
 
 	if err := tc.client.Hello("localhost"); err != nil {
 		t.Fatalf("Cannot say hello to server: %v", err)
+	}
+
+	if err := tc.client.Quit(); err != nil {
+		t.Fatal("Cannot send quit to server")
+	} else {
+		tc.client = nil // don't attempt Close()
+	}
+}
+
+func TestHelloNoEhlo(t *testing.T) {
+	tc := NewTestConnection(t)
+	defer tc.Close()
+	tc.ic.noEsmtp = true
+
+	if err := tc.Connect(); err != nil {
+		t.Fatalf("Cannot connect to server: %v", err)
+	}
+
+	if err := tc.client.Hello("localhost"); err != nil {
+		t.Fatalf("Cannot say hello to server: %v", err)
+	}
+
+	if err := tc.client.Quit(); err != nil {
+		t.Fatal("Cannot send quit to server")
+	} else {
+		tc.client = nil // don't attempt Close()
+	}
+}
+
+func TestVrfyExpnHelpNoop(t *testing.T) {
+	tc := NewTestConnection(t)
+	defer tc.Close()
+
+	if err := tc.Connect(); err != nil {
+		t.Fatalf("Cannot connect to server: %v", err)
+	}
+
+	if err := tc.client.Hello("localhost"); err != nil {
+		t.Fatalf("Cannot say hello to server: %v", err)
+	}
+
+	if err := tc.client.Verify("aa"); err == nil {
+		t.Fatalf("VRFY unexpectedly worked")
+	}
+
+	if err := tc.client.Expand("aa"); err == nil {
+		t.Fatalf("EXPN unexpectedly worked")
+	}
+
+	if err := tc.client.Help(); err != nil {
+		t.Fatalf("Cannot execute HELP: %v", err)
+	}
+
+	if err := tc.client.Noop(); err != nil {
+		t.Fatalf("Cannot execute Noop: %v", err)
+	}
+
+	if err := tc.client.NoopLong(); err == nil {
+		t.Fatalf("Unexpectedly could execute command with too long line")
 	}
 
 	if err := tc.client.Quit(); err != nil {
@@ -190,6 +323,14 @@ func TestAddressingSequencing(t *testing.T) {
 		t.Fatalf("Accepted 'RCPT TO' before MAIL")
 	}
 
+	if err := tc.client.Mail("aa"); err == nil {
+		t.Fatalf("Incorrectly executed bad 'MAIL FROM'")
+	}
+
+	if err := tc.client.BadMail("a@a"); err == nil {
+		t.Fatalf("Incorrectly executed bad 'MAIL FROM' (no colon)")
+	}
+
 	if err := tc.client.Mail("a@b"); err != nil {
 		t.Fatalf("Cannot execute 'MAIL FROM' to server: %v", err)
 	}
@@ -206,11 +347,21 @@ func TestAddressingSequencing(t *testing.T) {
 		t.Fatalf("Incorrectly executed bad 'RCPT TO'")
 	}
 
+	if err := tc.client.BadRcpt("a@a"); err == nil {
+		t.Fatalf("Incorrectly executed bad 'RCPT TO' (no colon)")
+	}
+
 	tc.itp.r = &ICResponse{
 		lines: newICRL(550, "5.5.0 Error: prohibited"),
 	}
 	if err := tc.client.Rcpt("a@a"); err == nil {
 		t.Fatalf("Incorrectly executed prohibited 'RCPT TO'")
+	}
+	tc.itp.r = &ICResponse{
+		lines: newICRL(220, "OK"),
+	}
+	if err := tc.client.Rcpt("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'RCPT TO' with explicit permission: %v", err)
 	}
 	tc.itp.r = nil
 
@@ -257,6 +408,162 @@ func TestData(t *testing.T) {
 		t.Fatalf("Cannot execute EHLO: %v", err)
 	}
 
+	if writer, err := tc.client.Data(); err == nil {
+		t.Fatalf("Incorrectly executed 'DATA' before MAIL FROM")
+	} else {
+		if writer != nil {
+			writer.Close()
+		}
+	}
+
+	if err := tc.client.Mail("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'MAIL FROM' to server: %v", err)
+	}
+
+	if writer, err := tc.client.Data(); err == nil {
+		t.Fatalf("Incorrectly executed 'DATA' before RCPT TO")
+	} else {
+		if writer != nil {
+			writer.Close()
+		}
+	}
+
+	if err := tc.client.Rcpt("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'RCPT TO': %v", err)
+	}
+
+	if writer, err := tc.client.Data(); err != nil {
+		t.Fatalf("Cannot execute 'DATA': %v", err)
+	} else {
+		// do not put broken line endings in here (e.g. \n rather than \r\n) and ensure you end with a \r, as otherwise
+		// golang's smtp sender fixes them up
+		towrite := []byte("Subject: test\r\n\r\nA line\r\n\r\n.begins with a dot\r\n\r\n.\r\nmore\r\nthat's all folks!\r\n")
+		if n, err := writer.Write(towrite); err != nil || n != len(towrite) {
+			t.Fatalf("Write failed err=%v len=%d (expecting %d)", err, n, len(towrite))
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+		if !bytes.Equal(tc.itp.data, towrite) {
+			t.Fatalf("Written data not identical")
+		}
+	}
+
+	if err := tc.client.Reset(); err != nil {
+		t.Fatalf("Cannot execute RSET: %v", err)
+	}
+
+	if err := tc.client.Mail("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'MAIL FROM' to server: %v", err)
+	}
+
+	if err := tc.client.Rcpt("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'RCPT TO': %v", err)
+	}
+
+	tc.itp.r = &ICResponse{
+		lines: newICRL(550, "5.5.0 Error: prohibited"),
+	}
+	if writer, err := tc.client.Data(); err != nil {
+		t.Fatalf("Cannot execute 'DATA': %v", err)
+	} else {
+		// do not put broken line endings in here (e.g. \n rather than \r\n) and ensure you end with a \r, as otherwise
+		// golang's smtp sender fixes them up
+		towrite := []byte("Subject: test\r\n\r\nA line\r\n\r\n.begins with a dot\r\n\r\n.\r\nmore\r\nthat's all folks!\r\n")
+		if n, err := writer.Write(towrite); err != nil || n != len(towrite) {
+			t.Fatalf("Write failed err=%v len=%d (expecting %d)", err, n, len(towrite))
+		}
+		if err := writer.Close(); err == nil {
+			t.Fatalf("Close succeeded when expected to be prohibited")
+		}
+	}
+	tc.itp.r = nil
+
+	if err := tc.client.Quit(); err != nil {
+		t.Fatal("Cannot send QUIT: %v", err)
+	} else {
+		tc.client = nil // don't attempt Close()
+	}
+}
+
+func sendOversizeData(t *testing.T, unit string, count int, max int) error {
+	tc := NewTestConnection(t)
+	defer tc.Close()
+
+	tc.ic.params.MaxMessageSize = max
+
+	if err := tc.Connect(); err != nil {
+		t.Fatalf("Cannot connect to server: %v", err)
+	}
+
+	if err := tc.client.Hello("localhost"); err != nil {
+		t.Fatalf("Cannot execute EHLO: %v", err)
+	}
+	if err := tc.client.Reset(); err != nil {
+		t.Fatalf("Cannot execute RSET to server: %v", err)
+	}
+
+	if err := tc.client.Mail("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'MAIL FROM' to server: %v", err)
+	}
+
+	if err := tc.client.Rcpt("a@b"); err != nil {
+		t.Fatalf("Cannot execute 'RCPT TO': %v", err)
+	}
+
+	if writer, err := tc.client.Data(); err != nil {
+		t.Fatalf("Cannot execute 'DATA': %v", err)
+	} else {
+		// do not put broken line endings in here (e.g. \n rather than \r\n) and ensure you end with a \r, as otherwise
+		// golang's smtp sender fixes them up
+		towrite := []byte(strings.Repeat(unit, count))
+		if n, err := writer.Write(towrite); err != nil || n != len(towrite) {
+			t.Logf("Write failed err=%v len=%d (expecting %d)", err, n, len(towrite))
+			return err
+		}
+
+		errClose := writer.Close()
+
+		if err := tc.client.Quit(); err != nil {
+			t.Fatal("Cannot send QUIT: %v", err)
+		} else {
+			tc.client = nil // don't attempt Close()
+		}
+
+		return errClose
+
+	}
+	return nil // not reached
+}
+
+func TestDataOversize(t *testing.T) {
+	if err := sendOversizeData(t, "x\n", 1024*1024, 4*1024*1024); err != nil {
+		t.Fatalf("Cannot send 2M message")
+	}
+
+	if err := sendOversizeData(t, "x\n", 1024*1024, 1024*1024); err == nil { // note twice as long as maximum
+		t.Fatalf("Oversize detection failure 1")
+	}
+
+	if err := sendOversizeData(t, "x", 2*1024*1024, 1024*1024); err == nil { // note twice as long as maximum
+		t.Fatalf("Oversize detection failure 2")
+	}
+}
+
+// for coverage testing. We can't check the data actually works though
+func TestDummyITP(t *testing.T) {
+	tc := NewTestConnection(t)
+	defer tc.Close()
+	tc.ic.ITP = &DummyITP{}
+
+	if err := tc.Connect(); err != nil {
+		t.Fatalf("Cannot connect to server: %v", err)
+	}
+
+	if err := tc.client.Hello("localhost"); err != nil {
+		t.Fatalf("Cannot execute EHLO: %v", err)
+	}
+
 	if err := tc.client.Mail("a@b"); err != nil {
 		t.Fatalf("Cannot execute 'MAIL FROM' to server: %v", err)
 	}
@@ -276,9 +583,6 @@ func TestData(t *testing.T) {
 		}
 		if err := writer.Close(); err != nil {
 			t.Fatalf("Close failed: %v", err)
-		}
-		if !bytes.Equal(tc.itp.data, towrite) {
-			t.Fatalf("Written data not identical")
 		}
 	}
 

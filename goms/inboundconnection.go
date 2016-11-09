@@ -76,6 +76,7 @@ type InboundConnection struct {
 	inTransaction        bool                         // true if in a transaction (i.e. has had 'MAIL FROM')
 	ReversePath          AddressString                // current sender
 	ITP                  InboundTransactionProcessor  // inbound transaction processor associated with this connection
+	noEsmtp              bool                         // turn on to disable ESMTP (for testing only - not for production)
 }
 
 // ICCommand holds an inbound command
@@ -166,6 +167,14 @@ func (c *InboundConnection) doHELO(ctx context.Context, params []byte) (*ICRespo
 // do EHLO implements the EHLO command
 func (c *InboundConnection) doEHLO(ctx context.Context, params []byte) (*ICResponse, error) {
 	c.reset()
+
+	// for coverage testing we have a secret flag to make this error
+	if c.noEsmtp {
+		return &ICResponse{
+			lines: newICRL(502, "5.5.1 Error: command not implemented"),
+		}, nil
+	}
+
 	r := &ICResponse{
 		lines: newICRL(250, c.params.GreetingHostname),
 	}
@@ -198,15 +207,24 @@ func (c *InboundConnection) doMAIL(ctx context.Context, params []byte) (*ICRespo
 			lines: newICRL(550, "5.1.7 Error: bad envelope sender address format"),
 		}, nil
 	} else {
-		fromAddress := AddressString(match[1])
+		f := AddressString("")
+		fromAddress := &f
+		if len(match[1]) != 0 {
+			if fromAddress = CanonicaliseInboundAddress(string(match[1])); fromAddress == nil {
+				return &ICResponse{
+					//RFC5321 3.3
+					lines: newICRL(550, "5.1.7 Error: bad envelope sender address component"),
+				}, nil
+			}
+		}
 
 		// check with the ITP that this is acceptable
-		if r, err := c.ITP.CheckFromAddress(ctx, c, &fromAddress); r != nil && r.IsError() || err != nil {
+		if r, err := c.ITP.CheckFromAddress(ctx, c, fromAddress); r != nil && r.IsError() || err != nil {
 			return r, err
 		}
 
 		c.inTransaction = true
-		c.ReversePath = fromAddress
+		c.ReversePath = *fromAddress
 		return &ICResponse{
 			lines:       newICRL(250, fmt.Sprintf("2.1.0 OK: mail is from '%s'", c.ReversePath)),
 			canPipeline: true,
@@ -230,13 +248,13 @@ func (c *InboundConnection) doRCPT(ctx context.Context, params []byte) (*ICRespo
 	if match := rcptToRE.FindSubmatch(params); match == nil || len(match) != 2 {
 		return &ICResponse{
 			// RFC5321 3.3
-			lines: newICRL(550, "5.1.3 Error: bad envelope recepient address component"),
+			lines: newICRL(550, "5.1.3 Error: bad envelope recepient address format"),
 		}, nil
 	} else {
 		if rcptAddress := CanonicaliseInboundAddress(string(match[1])); rcptAddress == nil {
 			return &ICResponse{
 				// RFC5321 3.3
-				lines: newICRL(550, "5.1.3 Error: bad envelope recepient address format"),
+				lines: newICRL(550, "5.1.3 Error: bad envelope recepient address component"),
 			}, nil
 		} else {
 			// check with the ITP that this is acceptable
@@ -354,9 +372,6 @@ func (c *InboundConnection) doDATA(ctx context.Context, params []byte) (*ICRespo
 			lines: newICRL(552, "4.3.4 Error: message too big for system"),
 		}, nil
 	}
-
-	// now we need to do something with the message.
-	log.Printf("[DEBUG] message = %v", body.Bytes())
 
 	// Process via the ITP. Note this can return its own 250 message, with the appropriate 'queued' response
 	// (e.g. a queue ID), which is more helpful than the default message
@@ -587,8 +602,14 @@ func (c *InboundConnection) serveLoop(ctx context.Context) error {
 		return c.Send(r)
 	}
 
+	// for testing only
+	esmtp := "ESMTP"
+	if c.noEsmtp {
+		esmtp = "SMTP"
+	}
+
 	if err := c.Send(&ICResponse{
-		lines: newICRL(220, fmt.Sprintf("%s ESMTP %s", c.params.GreetingHostname, c.params.GreetingMailserver)),
+		lines: newICRL(220, fmt.Sprintf("%s %s %s", c.params.GreetingHostname, esmtp, c.params.GreetingMailserver)),
 	}); err != nil {
 		return err
 	}
