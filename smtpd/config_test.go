@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+var config string = `
+servers:
+- protocol: tcp
+  address: 127.0.0.1:30025
+logging:
+  syslogfacility: local1
+`
+
 func sendTestMail(t *testing.T) {
 	// Connect to the local SMTP server.
 	c, err := smtp.Dial("127.0.0.1:30025")
@@ -44,20 +52,35 @@ func sendTestMail(t *testing.T) {
 	}
 }
 
+func TestForeground(t *testing.T) {
+	dir, err := ioutil.TempDir("", "gomstest")
+	if err != nil {
+		t.Fatalf("Could not create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	conffn := filepath.Join(dir, "goms.conf")
+	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
+		t.Fatalf("Could not create config file: %v", err)
+	}
+	pidfn := filepath.Join(dir, "goms.pid")
+
+	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-f"}
+	flag.Parse()
+	go Run(nil)
+
+	time.Sleep(200 * time.Millisecond)
+
+	sendTestMail(t)
+}
+
 func TestDaemonize(t *testing.T) {
 	dir, err := ioutil.TempDir("", "gomstest")
 	if err != nil {
 		t.Fatalf("Could not create temporary directory: %v", err)
 	}
-	//defer os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
 
-	config := `
-servers:
-- protocol: tcp
-  address: 127.0.0.1:30025
-logging:
-  syslogfacility: local1
-`
 	conffn := filepath.Join(dir, "goms.conf")
 	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
 		t.Fatalf("Could not create config file: %v", err)
