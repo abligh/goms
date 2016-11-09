@@ -13,7 +13,7 @@ import (
 
 func sendTestMail(t *testing.T) {
 	// Connect to the local SMTP server.
-	c, err := smtp.Dial("localhost:2525")
+	c, err := smtp.Dial("127.0.0.1:30025")
 	if err != nil {
 		t.Fatalf("Could not connect to local SMTP server: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestDaemonize(t *testing.T) {
 	config := `
 servers:
 - protocol: tcp
-  address: 127.0.0.1:2525
+  address: 127.0.0.1:30025
 logging:
   syslogfacility: local1
 `
