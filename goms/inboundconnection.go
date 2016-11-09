@@ -548,8 +548,6 @@ func (c *InboundConnection) Process(ctx context.Context, cmd *ICCommand) (*ICRes
 	} else {
 		return v.Run(c, ctx, words[1])
 	}
-
-	return &ICResponse{lines: newICRL(500, "5.5.0 Error: internal error")}, nil
 }
 
 // Serve processes an SMTP conversation, closing the connections etc. when done

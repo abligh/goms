@@ -96,6 +96,18 @@ func (c *SMTPClient) BadRcpt(addr string) error {
 	return err
 }
 
+// Send a bad empty command
+func (c *SMTPClient) BadEmpty() error {
+	_, _, err := c.Cmd(250, "\r")
+	return err
+}
+
+// Send a bad nony command
+func (c *SMTPClient) BadNonexistant() error {
+	_, _, err := c.Cmd(250, "WOMBAT")
+	return err
+}
+
 // TestITP is an InboundTransactionProcessor which accepts all mail and dumps it
 type TestITP struct {
 	r    *ICResponse // response to return for all transactions
@@ -157,6 +169,7 @@ func NewTestConnection(t *testing.T) *TestConnection {
 		t.Log("[FATAL] Abort after timeout")
 		tc.Close()
 	})
+
 	// Start the server
 	go ic.Serve(tc.ctx)
 
@@ -298,6 +311,14 @@ func TestVrfyExpnHelpNoop(t *testing.T) {
 
 	if err := tc.client.NoopLong(); err == nil {
 		t.Fatalf("Unexpectedly could execute command with too long line")
+	}
+
+	if err := tc.client.BadEmpty(); err == nil {
+		t.Fatalf("Unexpectedly could execute bad empty command")
+	}
+
+	if err := tc.client.BadNonexistant(); err == nil {
+		t.Fatalf("Unexpectedly could execute bad non-existant command")
 	}
 
 	if err := tc.client.Quit(); err != nil {
