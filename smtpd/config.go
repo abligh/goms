@@ -5,7 +5,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/sevlyar/go-daemon"
+	//	"github.com/sevlyar/go-daemon"
+	"github.com/abligh/go-daemon"
 	"gopkg.in/yaml.v2"
 	"io"
 	"io/ioutil"
@@ -68,6 +69,7 @@ var tlsClientAuthMap = map[string]tls.ClientAuthType{
 
 type Control struct {
 	quit chan struct{}
+	wg   sync.WaitGroup
 }
 
 // Config holds the config that applies to all servers (currently just logging), and an array of server configs
@@ -341,6 +343,7 @@ func RunConfig(control *Control) {
 		if logCloser != nil {
 			logCloser.Close()
 		}
+		control.wg.Done()
 	}()
 
 	intr := make(chan os.Signal, 1)
@@ -425,6 +428,10 @@ func RunConfig(control *Control) {
 func Run(control *Control) {
 	if control == nil {
 		control = &Control{}
+		// normally adding to a waitgroup inside the go-routine that
+		// exits is racy, but nil is only ever passed in if we don't
+		// care wat happens on quit
+		control.wg.Add(1)
 	}
 
 	if *pprof {
@@ -513,8 +520,6 @@ func Run(control *Control) {
 
 	defer func() {
 		d.Release()
-		// for some reason this is not removing the pid file
-		os.Remove(*pidFile)
 	}()
 
 	RunConfig(control)

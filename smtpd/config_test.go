@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/smtp"
 	"os"
@@ -66,6 +65,72 @@ func sendTestMail(t *testing.T) {
 	}
 }
 
+func flagParse(args []string) {
+	saveArgs := os.Args
+	os.Args = args
+	flag.Parse()
+	os.Args = saveArgs
+}
+
+func waitForPidFile(t *testing.T, pidfn string, shouldExist bool) {
+	correct := false
+	for i := 1; i < 20; i++ {
+		if _, err := os.Stat(pidfn); shouldExist == (err == nil || !os.IsNotExist(err)) {
+			correct = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !correct {
+		if shouldExist {
+			t.Fatalf("Pidfile not present: %v", pidfn)
+		} else {
+			t.Fatalf("Pidfile not deleted: %v", pidfn)
+		}
+	}
+}
+
+// this test needs to be first
+func TestDaemonize(t *testing.T) {
+	dir, err := ioutil.TempDir("", "gomstest")
+	if err != nil {
+		t.Fatalf("Could not create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	conffn := filepath.Join(dir, "goms.conf")
+	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
+		t.Fatalf("Could not create config file: %v", err)
+	}
+	pidfn := filepath.Join(dir, "goms.pid")
+
+	flagParse([]string{"goms", "-c", conffn, "-p", pidfn})
+	Run(nil)
+
+	waitForPidFile(t, pidfn, true)
+
+	time.Sleep(100 * time.Millisecond)
+
+	sendTestMail(t)
+
+	time.Sleep(100 * time.Millisecond)
+	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"}
+	flag.Parse()
+	Run(nil)
+
+	waitForPidFile(t, pidfn, true)
+
+	time.Sleep(20 * time.Millisecond)
+
+	sendTestMail(t)
+
+	time.Sleep(100 * time.Millisecond)
+	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "stop", "-test.v", "-test.run", "TestDaeemonize"})
+	Run(nil)
+
+	waitForPidFile(t, pidfn, false)
+}
+
 func TestForeground(t *testing.T) {
 	dir, err := ioutil.TempDir("", "gomstest")
 	if err != nil {
@@ -79,74 +144,16 @@ func TestForeground(t *testing.T) {
 	}
 	pidfn := filepath.Join(dir, "goms.pid")
 
-	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-f"}
-	flag.Parse()
-	go Run(nil)
+	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-f"})
+	c := &Control{
+		quit: make(chan struct{}),
+	}
+	c.wg.Add(1)
+	go Run(c)
 
 	time.Sleep(200 * time.Millisecond)
 
 	sendTestMail(t)
-}
-
-func skipTestDaemonize(t *testing.T) {
-	dir, err := ioutil.TempDir("", "gomstest")
-	if err != nil {
-		t.Fatalf("Could not create temporary directory: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
-	conffn := filepath.Join(dir, "goms.conf")
-	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
-		t.Fatalf("Could not create config file: %v", err)
-	}
-	pidfn := filepath.Join(dir, "goms.pid")
-
-	os.Args = []string{"goms", "-c", conffn, "-p", pidfn}
-	flag.Parse()
-	Run(nil)
-
-	time.Sleep(500 * time.Millisecond)
-
-	log.Printf(">>>> it's at %v", pidfn)
-	if pid, err := ioutil.ReadFile(pidfn); err == nil {
-		log.Printf(">>> pid is %v", pid)
-	} else {
-		log.Printf(">>> Error: %v", err)
-	}
-
-	if _, err := os.Stat(pidfn); err != nil {
-		t.Fatalf("Could not find pidfile: %v", err)
-	}
-
-	sendTestMail(t)
-
-	time.Sleep(100 * time.Millisecond)
-	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"}
-	flag.Parse()
-	Run(nil)
-
-	time.Sleep(100 * time.Millisecond)
-
-	if _, err := os.Stat(pidfn); err != nil {
-		t.Fatalf("Could not find pidfile: %v", err)
-	}
-
-	sendTestMail(t)
-
-	time.Sleep(100 * time.Millisecond)
-	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-s", "stop"}
-	flag.Parse()
-	Run(nil)
-
-	exists := true
-	for i := 1; i < 20; i++ {
-		if _, err := os.Stat(pidfn); err != nil && os.IsNotExist(err) {
-			exists = false
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if exists {
-		t.Fatalf("Pidfile not deleted: %v", pidfn)
-	}
+	close(c.quit)
+	c.wg.Wait()
 }
