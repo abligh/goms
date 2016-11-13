@@ -114,8 +114,8 @@ func isTrueFalse(v string) (bool, bool, error) {
 }
 
 // ParseConfig parses the YAML configuration provided
-func ParseConfig() (*Config, error) {
-	if buf, err := ioutil.ReadFile(*configFile); err != nil {
+func ParseConfig(confFile string) (*Config, error) {
+	if buf, err := ioutil.ReadFile(confFile); err != nil {
 		return nil, err
 	} else {
 		c := &Config{}

@@ -98,7 +98,7 @@ func RunConfig(control *Control) {
 	for {
 		var wg sync.WaitGroup
 		configCtx, configCancelFunc := context.WithCancel(ctx)
-		if c, err := ParseConfig(); err != nil {
+		if c, err := ParseConfig(*configFile); err != nil {
 			logger.Println("[ERROR] Cannot parse configuration file: %v", err)
 			return
 		} else {
@@ -184,7 +184,7 @@ func Run(control *Control) {
 	// but it eliminates a problem where the log of the configuration failing
 	// is invisible when daemonizing naively (e.g. when no alternate log
 	// destination is supplied) and the config file cannot be read
-	if _, err := ParseConfig(); err != nil {
+	if _, err := ParseConfig(*configFile); err != nil {
 		logger.Fatalf("[CRIT] Cannot parse configuration file: %v", err)
 	}
 

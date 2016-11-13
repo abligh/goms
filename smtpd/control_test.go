@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var config string = `
+var controlTestConfig string = `
 servers:
 - protocol: tcp
   address: 127.0.0.1:30025
@@ -99,7 +99,7 @@ func TestDaemonize(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	conffn := filepath.Join(dir, "goms.conf")
-	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
+	if err := ioutil.WriteFile(conffn, []byte(controlTestConfig), 0666); err != nil {
 		t.Fatalf("Could not create config file: %v", err)
 	}
 	pidfn := filepath.Join(dir, "goms.pid")
@@ -139,7 +139,7 @@ func TestForeground(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	conffn := filepath.Join(dir, "goms.conf")
-	if err := ioutil.WriteFile(conffn, []byte(config), 0666); err != nil {
+	if err := ioutil.WriteFile(conffn, []byte(controlTestConfig), 0666); err != nil {
 		t.Fatalf("Could not create config file: %v", err)
 	}
 	pidfn := filepath.Join(dir, "goms.pid")
