@@ -35,6 +35,9 @@ func TestTrueFalse(t *testing.T) {
 	if tr, fa, err := isTrueFalse("neither"); err == nil || tr != false || fa != false {
 		t.Fatalf("isTrueFalse failed with 'neither': %v %v %v", tr, fa, err)
 	}
+	if tr, fa, err := isTrueFalse(""); err != nil || tr != false || fa != false {
+		t.Fatalf("isTrueFalse failed with '': %v %v %v", tr, fa, err)
+	}
 }
 
 func writeConfig(t *testing.T, conf, fn string) {
@@ -48,11 +51,11 @@ func testConfig(t *testing.T, conf string, fn string, desc string, shouldWork bo
 	c, err := ParseConfig(fn)
 	if shouldWork {
 		if c == nil || err != nil {
-			t.Fatalf("Working config %s failed: %v, %v", c, err)
+			t.Fatalf("Working config '%s' failed: %v, %v", desc, c, err)
 		}
 	} else {
 		if c != nil || err == nil {
-			t.Fatalf("Broken config %s passed: %v, %v", c, err)
+			t.Fatalf("Broken config '%s' passed: %v, %v", desc, c, err)
 		}
 
 	}
@@ -66,6 +69,10 @@ func TestConfigParser(t *testing.T) {
 	defer os.RemoveAll(dir)
 	fn := filepath.Join(dir, "goms.conf")
 
+	if _, err := ParseConfig(fn + "-does-not-exist"); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("Non-existent config parsing failed: %v", err)
+	}
+
 	testConfig(t, `
 zz
 `,
@@ -75,6 +82,8 @@ zz
 servers:
 - protocol: tcp
   address: 127.0.0.1:30025
+- protocol: tcp
+- address: 127.0.0.1:30025
 logging:
   syslogfacility: local1
 `,
