@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/smtp"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,6 +20,10 @@ servers:
 logging:
   syslogfacility: local1
 `
+
+const (
+	gomsfgaction = "GOMS_FG_ACTION"
+)
 
 func sendTestMail(t *testing.T) {
 
@@ -144,6 +149,53 @@ func TestForeground(t *testing.T) {
 	}
 	pidfn := filepath.Join(dir, "goms.pid")
 
+	switch os.Getenv(gomsfgaction) {
+	case "signalnotrunning":
+		flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"})
+		c := &Control{
+			quit: make(chan struct{}),
+		}
+		c.wg.Add(1)
+		go Run(c)
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	case "signalunknown":
+		flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "unknown"})
+		c := &Control{
+			quit: make(chan struct{}),
+		}
+		c.wg.Add(1)
+		go Run(c)
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	case "badconffile":
+		flagParse([]string{"goms", "-c", "////", "-p", pidfn, "-f"})
+		c := &Control{
+			quit: make(chan struct{}),
+		}
+		c.wg.Add(1)
+		go Run(c)
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	case "badpidfile":
+		flagParse([]string{"goms", "-c", conffn, "-p", "////", "-f"})
+		c := &Control{
+			quit: make(chan struct{}),
+		}
+		c.wg.Add(1)
+		go Run(c)
+		time.Sleep(500 * time.Millisecond)
+	case "noconffile":
+		flagParse([]string{"goms", "-c", conffn + "-unknown", "-p", pidfn, "-f"})
+		c := &Control{
+			quit: make(chan struct{}),
+		}
+		c.wg.Add(1)
+		go Run(c)
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}
+
 	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-f"})
 	c := &Control{
 		quit: make(chan struct{}),
@@ -156,4 +208,26 @@ func TestForeground(t *testing.T) {
 	sendTestMail(t)
 	close(c.quit)
 	c.wg.Wait()
+}
+
+func testForegroundAction(t *testing.T, action string) {
+	if fn, err := filepath.Abs("../" + os.Args[0]); err != nil {
+		t.Fatalf("Error canonicalising config file path: %s", err)
+	} else {
+		cmd := exec.Command(fn, "-test.run=TestForeground")
+		cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", gomsfgaction, action))
+		err := cmd.Run()
+		if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+			return
+		}
+		t.Fatalf("TestLaunchErrors test '%s' ran with err %v, want exit status 1", action, err)
+	}
+}
+
+func TestLaunchErrors(t *testing.T) {
+	testForegroundAction(t, "signalnotrunning")
+	testForegroundAction(t, "signalunknown")
+	testForegroundAction(t, "badconffile")
+	testForegroundAction(t, "badpidfile")
+	testForegroundAction(t, "noconffile")
 }
