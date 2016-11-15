@@ -19,8 +19,9 @@ import (
 
 // Control mediates the running of the main process
 type Control struct {
-	quit chan struct{}
-	wg   sync.WaitGroup
+	quit     chan struct{}
+	wg       sync.WaitGroup
+	dummyRun bool
 }
 
 // Startserver starts a single server.
@@ -94,6 +95,10 @@ func RunConfig(control *Control) {
 			}
 		}
 	}()
+
+	if control.dummyRun {
+		os.Exit(0)
+	}
 
 	for {
 		var wg sync.WaitGroup

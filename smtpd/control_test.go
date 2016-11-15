@@ -149,61 +149,35 @@ func TestForeground(t *testing.T) {
 	}
 	pidfn := filepath.Join(dir, "goms.pid")
 
+	c := &Control{
+		quit:     make(chan struct{}),
+		dummyRun: true,
+	}
+	c.wg.Add(1)
+
 	switch os.Getenv(gomsfgaction) {
 	case "signalnotrunning":
 		flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"})
-		c := &Control{
-			quit: make(chan struct{}),
-		}
-		c.wg.Add(1)
-		go Run(c)
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0)
 	case "signalunknown":
 		flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "unknown"})
-		c := &Control{
-			quit: make(chan struct{}),
-		}
-		c.wg.Add(1)
-		go Run(c)
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0)
 	case "badconffile":
 		flagParse([]string{"goms", "-c", "////", "-p", pidfn, "-f"})
-		c := &Control{
-			quit: make(chan struct{}),
-		}
-		c.wg.Add(1)
-		go Run(c)
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0)
 	case "badpidfile":
 		flagParse([]string{"goms", "-c", conffn, "-p", "////", "-f"})
-		c := &Control{
-			quit: make(chan struct{}),
-		}
-		c.wg.Add(1)
-		go Run(c)
-		time.Sleep(500 * time.Millisecond)
 	case "noconffile":
 		flagParse([]string{"goms", "-c", conffn + "-unknown", "-p", pidfn, "-f"})
-		c := &Control{
-			quit: make(chan struct{}),
-		}
-		c.wg.Add(1)
-		go Run(c)
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0)
+	default:
+		flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-f"})
+		c.dummyRun = false
 	}
 
-	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-f"})
-	c := &Control{
-		quit: make(chan struct{}),
-	}
-	c.wg.Add(1)
 	go Run(c)
 
 	time.Sleep(200 * time.Millisecond)
+
+	if c.dummyRun {
+		os.Exit(0)
+	}
 
 	sendTestMail(t)
 	close(c.quit)
