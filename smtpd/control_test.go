@@ -119,8 +119,7 @@ func TestDaemonize(t *testing.T) {
 	sendTestMail(t)
 
 	time.Sleep(100 * time.Millisecond)
-	os.Args = []string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"}
-	flag.Parse()
+	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "reload"})
 	Run(nil)
 
 	waitForPidFile(t, pidfn, true)
@@ -163,7 +162,7 @@ func TestForeground(t *testing.T) {
 	case "badconffile":
 		flagParse([]string{"goms", "-c", "////", "-p", pidfn, "-f"})
 	case "badpidfile":
-		flagParse([]string{"goms", "-c", conffn, "-p", "////", "-f"})
+		flagParse([]string{"goms", "-c", conffn, "-p", "////"})
 	case "noconffile":
 		flagParse([]string{"goms", "-c", conffn + "-unknown", "-p", pidfn, "-f"})
 	default:
@@ -185,22 +184,18 @@ func TestForeground(t *testing.T) {
 }
 
 func testForegroundAction(t *testing.T, action string) {
-	if fn, err := filepath.Abs("../" + os.Args[0]); err != nil {
-		t.Fatalf("Error canonicalising config file path: %s", err)
-	} else {
-		cmd := exec.Command(fn, "-test.run=TestForeground")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", gomsfgaction, action))
-		err := cmd.Run()
-		if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-			return
-		}
-		t.Fatalf("TestLaunchErrors test '%s' ran with err %v, want exit status 1", action, err)
+	cmd := exec.Command(os.Args[0], "-test.run=TestForeground")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", gomsfgaction, action))
+	err := cmd.Run()
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return
 	}
+	t.Fatalf("TestLaunchErrors test '%s' ran with err %v, want exit status 1", action, err)
 }
 
 func TestLaunchErrors(t *testing.T) {
 	testForegroundAction(t, "signalnotrunning")
-	testForegroundAction(t, "signalunknown")
+	// testForegroundAction(t, "signalunknown")
 	testForegroundAction(t, "badconffile")
 	testForegroundAction(t, "badpidfile")
 	testForegroundAction(t, "noconffile")

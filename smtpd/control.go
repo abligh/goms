@@ -104,11 +104,11 @@ func RunConfig(control *Control) {
 		var wg sync.WaitGroup
 		configCtx, configCancelFunc := context.WithCancel(ctx)
 		if c, err := ParseConfig(*configFile); err != nil {
-			logger.Println("[ERROR] Cannot parse configuration file: %v", err)
+			logger.Printf("[ERROR] Cannot parse configuration file: %v", err)
 			return
 		} else {
 			if nlogger, nlogCloser, err := c.GetLogger(); err != nil {
-				logger.Println("[ERROR] Could not load logger: %v", err)
+				logger.Printf("[ERROR] Could not load logger: %v", err)
 			} else {
 				if logCloser != nil {
 					logCloser.Close()
