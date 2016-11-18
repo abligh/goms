@@ -167,6 +167,7 @@ func Run(control *Control) {
 
 	daemon.AddFlag(daemon.StringFlag(sendSignal, "stop"), syscall.SIGTERM)
 	daemon.AddFlag(daemon.StringFlag(sendSignal, "reload"), syscall.SIGHUP)
+	daemon.AddFlag(daemon.StringFlag(sendSignal, "gc"), syscall.SIGUSR1)
 
 	if daemon.WasReborn() {
 		if val := os.Getenv(ENV_CONFFILE); val != "" {

@@ -142,6 +142,16 @@ func TestDaemonize(t *testing.T) {
 	sendTestMail(t)
 
 	time.Sleep(100 * time.Millisecond)
+	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "gc"})
+	Run(nil)
+
+	waitForPidFile(t, pidfn, true)
+
+	time.Sleep(100 * time.Millisecond)
+
+	sendTestMail(t)
+
+	time.Sleep(100 * time.Millisecond)
 	flagParse([]string{"goms", "-c", conffn, "-p", pidfn, "-s", "stop", "-test.v", "-test.run", "TestDaeemonize"})
 	Run(nil)
 
