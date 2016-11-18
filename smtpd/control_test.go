@@ -27,10 +27,23 @@ const (
 
 func sendTestMail(t *testing.T) {
 
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:30025", 2*time.Second)
+	var conn net.Conn
+	var err error
+	retries := 0
+
+	for retries < 20 {
+		conn, err = net.DialTimeout("tcp", "127.0.0.1:30025", 2*time.Second)
+		if err == nil {
+			break
+		}
+		retries++
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if err != nil {
 		t.Fatalf("Could not dial to initiate connection: %v", err)
 	}
+
 	c, err := smtp.NewClient(conn, "localhost")
 	// Connect to the local SMTP server.
 	// c, err := smtp.Dial("127.0.0.1:30025")
@@ -124,7 +137,7 @@ func TestDaemonize(t *testing.T) {
 
 	waitForPidFile(t, pidfn, true)
 
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	sendTestMail(t)
 
